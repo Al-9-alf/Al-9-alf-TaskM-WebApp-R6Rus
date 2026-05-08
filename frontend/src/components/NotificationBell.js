@@ -43,7 +43,6 @@ const NotificationBell = () => {
   });
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
-
   return (
     <div className="relative">
       <button

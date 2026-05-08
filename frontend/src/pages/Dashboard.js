@@ -15,21 +15,42 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts';
+import toast from 'react-hot-toast';
 
 const fetchMyAnalytics = async () => {
   const token = localStorage.getItem('token');
-  const response = await axios.get('http://localhost:8000/api/analytics/my/overview', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return response.data;
+  try {
+    const response = await axios.get('http://localhost:8000/api/analytics/my/overview', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching my analytics:', error);
+    return {
+      completion_rate: 0,
+      overdue_tasks: 0,
+      active_tasks: 0,
+      tasks_by_status: {},
+      avg_completion_time: null
+    };
+  }
 };
 
 const fetchTeamSummary = async () => {
   const token = localStorage.getItem('token');
-  const response = await axios.get('http://localhost:8000/api/analytics/team/summary', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return response.data;
+  try {
+    const response = await axios.get('http://localhost:8000/api/analytics/team/summary', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching team summary:', error);
+    return {
+      avg_completion_rate: 0,
+      total_overdue_tasks: 0,
+      total_active_tasks: 0
+    };
+  }
 };
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
@@ -37,15 +58,31 @@ const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 const Dashboard = () => {
   const { user, isAdmin, isManager } = useAuth();
   
-  const { data: analytics, isLoading } = useQuery('myAnalytics', fetchMyAnalytics, {
-    enabled: !isAdmin,
-  });
+  const { data: analytics, isLoading: analyticsLoading } = useQuery(
+    'myAnalytics', 
+    fetchMyAnalytics, 
+    { 
+      enabled: !isAdmin,
+      retry: 1,
+      onError: (error) => {
+        console.error('Analytics query error:', error);
+      }
+    }
+  );
 
-  const { data: teamSummary, isLoading: teamLoading } = useQuery('teamSummary', fetchTeamSummary, {
-    enabled: isAdmin || isManager,
-  });
+  const { data: teamSummary, isLoading: teamLoading } = useQuery(
+    'teamSummary', 
+    fetchTeamSummary, 
+    {
+      enabled: isAdmin || isManager,
+      retry: 1,
+      onError: (error) => {
+        console.error('Team summary query error:', error);
+      }
+    }
+  );
 
-  if (isLoading || teamLoading) {
+  if ((analyticsLoading && !isAdmin) || (teamLoading && (isAdmin || isManager))) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -78,7 +115,7 @@ const Dashboard = () => {
         <p className="text-gray-600">С возвращением, {user?.full_name}!</p>
       </div>
 
-      {isAdmin && teamSummary && (
+      {(isAdmin || isManager) && teamSummary && (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 mb-8">
           <div className="bg-white overflow-hidden shadow rounded-lg">
             <div className="p-5">

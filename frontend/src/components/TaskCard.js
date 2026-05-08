@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from 'react-query';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-import { CalendarIcon, UserIcon, ChatBubbleLeftIcon, UserPlusIcon } from '@heroicons/react/24/outline';
+import { CalendarIcon, UserIcon, ChatBubbleLeftIcon, UserPlusIcon, BuildingOfficeIcon, PlayIcon, PaperAirplaneIcon, CheckCircleIcon, ArrowUturnLeftIcon, ArchiveBoxIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -20,6 +20,14 @@ const archiveTask = async (id) => {
   });
 };
 
+const updateTaskStatus = async ({ id, status }) => {
+  const token = localStorage.getItem('token');
+  const response = await axios.post(`http://localhost:8000/api/tasks/${id}/status`, null, {
+    params: { status }
+  });
+  return response.data;
+};
+
 const delegateTask = async ({ id, newAssigneeId, reason }) => {
   const token = localStorage.getItem('token');
   const response = await axios.post(`http://localhost:8000/api/tasks/${id}/delegate`, {
@@ -31,12 +39,12 @@ const delegateTask = async ({ id, newAssigneeId, reason }) => {
   return response.data;
 };
 
-const TaskCard = ({ task, onStatusChange }) => {
+const TaskCard = ({ task }) => {
   const [showComments, setShowComments] = useState(false);
   const [showDelegate, setShowDelegate] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [delegateData, setDelegateData] = useState({ newAssigneeId: '', reason: '' });
-  const { isManager, user } = useAuth();
+  const { isManager, isAdmin, user } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: users = [] } = useQuery('usersForDelegate', async () => {
@@ -58,6 +66,16 @@ const TaskCard = ({ task, onStatusChange }) => {
     onSuccess: () => {
       queryClient.invalidateQueries('tasks');
       toast.success('Задача архивирована');
+    },
+  });
+
+  const updateStatusMutation = useMutation(updateTaskStatus, {
+    onSuccess: () => {
+      queryClient.invalidateQueries('tasks');
+      toast.success('Статус задачи обновлён');
+    },
+    onError: (error) => {
+      toast.error('Ошибка обновления статуса: ' + (error.response?.data?.detail || 'Неизвестная ошибка'));
     },
   });
 
@@ -113,11 +131,51 @@ const TaskCard = ({ task, onStatusChange }) => {
       case 'in_progress': return 'В работе';
       case 'in_review': return 'На проверке';
       case 'completed': return 'Завершена';
+      case 'archived': return 'Архив';
       default: return status;
     }
   };
 
-  const isOverdue = new Date(task.deadline) < new Date() && task.status !== 'completed' && task.status !== 'archived';
+  const isOverdue = task.deadline 
+    ? new Date(task.deadline) < new Date() && task.status !== 'completed' && task.status !== 'archived'
+    : false;
+  
+  const isAssignee = task.assigned_to === user?.id;
+  const isManagerOfGroup = isManager && !isAdmin;
+  
+  const canManage = isAdmin || (isManagerOfGroup && task.assignee?.group_id === user?.group_id);
+  const canChangeStatus = isAdmin || isAssignee || (isManagerOfGroup && task.assignee?.group_id === user?.group_id);
+
+  const assigneeName = task.assignee?.full_name || (task.assigned_to_name ? `${task.assigned_to_name} (удалён)` : 'Не назначен');
+  const creatorName = task.creator?.full_name || (task.created_by_name ? `${task.created_by_name} (удалён)` : 'Неизвестен');
+
+  const handleTakeToWork = () => {
+    updateStatusMutation.mutate({ id: task.id, status: 'in_progress' });
+  };
+
+  const handleSendToReview = () => {
+    updateStatusMutation.mutate({ id: task.id, status: 'in_review' });
+  };
+
+  const handleComplete = () => {
+    updateStatusMutation.mutate({ id: task.id, status: 'completed' });
+  };
+
+  const handleSendToRework = () => {
+    updateStatusMutation.mutate({ id: task.id, status: 'in_progress' });
+  };
+
+  const handleArchive = () => {
+    if (window.confirm('Архивировать эту задачу?')) {
+      archiveMutation.mutate(task.id);
+    }
+  };
+
+  const handleDelete = () => {
+    if (window.confirm('Удалить эту задачу навсегда? Это действие необратимо.')) {
+      deleteMutation.mutate(task.id);
+    }
+  };
 
   return (
     <div className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow">
@@ -127,7 +185,13 @@ const TaskCard = ({ task, onStatusChange }) => {
           <span className={`px-2 py-1 text-xs rounded-full ${getPriorityColor(task.priority)}`}>
             {getPriorityText(task.priority)}
           </span>
-          <span className={`px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800`}>
+          <span className={`px-2 py-1 text-xs rounded-full ${
+            task.status === 'completed' ? 'bg-green-100 text-green-800' :
+            task.status === 'archived' ? 'bg-gray-100 text-gray-800' :
+            task.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+            task.status === 'in_review' ? 'bg-yellow-100 text-yellow-800' :
+            'bg-gray-100 text-gray-800'
+          }`}>
             {getStatusText(task.status)}
           </span>
         </div>
@@ -140,31 +204,85 @@ const TaskCard = ({ task, onStatusChange }) => {
       <div className="space-y-1 text-sm text-gray-500">
         <div className="flex items-center">
           <UserIcon className="h-4 w-4 mr-2" />
-          <span>Исполнитель: {task.assignee?.full_name}</span>
+          <span>Исполнитель: {assigneeName}</span>
+        </div>
+        {task.assignee_group_name && task.assignee && !task.assignee.full_name.includes('удалён') && (
+          <div className="flex items-center">
+            <BuildingOfficeIcon className="h-4 w-4 mr-2" />
+            <span>Группа: {task.assignee_group_name}</span>
+          </div>
+        )}
+        <div className="flex items-center">
+          <UserIcon className="h-4 w-4 mr-2" />
+          <span>Создатель: {creatorName}</span>
         </div>
         <div className={`flex items-center ${isOverdue ? 'text-red-600' : ''}`}>
           <CalendarIcon className="h-4 w-4 mr-2" />
-          <span>Срок: {format(new Date(task.deadline), 'dd MMM yyyy')}</span>
-          {isOverdue && <span className="ml-2 text-red-600 font-medium">(Просрочена)</span>}
+          {task.deadline ? (
+            <>
+              <span>Срок: {format(new Date(task.deadline), 'dd MMM yyyy HH:mm')}</span>
+              {isOverdue && <span className="ml-2 text-red-600 font-medium">(Просрочена)</span>}
+            </>
+          ) : (
+            <span>Без срока</span>
+          )}
         </div>
+        {task.delegation_reason && (
+          <div className="text-xs text-gray-400 mt-1">
+            Причина делегирования: {task.delegation_reason}
+          </div>
+        )}
       </div>
 
-      {task.assigned_to === user?.id && task.status !== 'completed' && task.status !== 'archived' && (
-        <div className="mt-3">
-          <select
-            value={task.status}
-            onChange={(e) => onStatusChange(task.id, e.target.value)}
-            className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="new">Новая</option>
-            <option value="in_progress">В работе</option>
-            <option value="in_review">На проверке</option>
-            <option value="completed">Завершена</option>
-          </select>
+      {isAssignee && task.status !== 'completed' && task.status !== 'archived' && task.assignee && !task.assignee.full_name.includes('удалён') && (
+        <div className="mt-3 space-y-2">
+          {task.status === 'new' && (
+            <button
+              onClick={handleTakeToWork}
+              disabled={updateStatusMutation.isLoading}
+              className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              <PlayIcon className="h-4 w-4 mr-2" />
+              Взять в работу
+            </button>
+          )}
+          
+          {task.status === 'in_progress' && (
+            <button
+              onClick={handleSendToReview}
+              disabled={updateStatusMutation.isLoading}
+              className="w-full flex items-center justify-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50"
+            >
+              <PaperAirplaneIcon className="h-4 w-4 mr-2" />
+              Отправить на проверку
+            </button>
+          )}
         </div>
       )}
 
-      <div className="mt-3 flex space-x-3">
+      {canManage && task.status === 'in_review' && (
+        <div className="mt-3 space-y-2">
+          <button
+            onClick={handleComplete}
+            disabled={updateStatusMutation.isLoading}
+            className="w-full flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+          >
+            <CheckCircleIcon className="h-4 w-4 mr-2" />
+            Завершить работу
+          </button>
+          
+          <button
+            onClick={handleSendToRework}
+            disabled={updateStatusMutation.isLoading}
+            className="w-full flex items-center justify-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+          >
+            <ArrowUturnLeftIcon className="h-4 w-4 mr-2" />
+            Отправить на доработку
+          </button>
+        </div>
+      )}
+
+      <div className="mt-3 flex space-x-3 flex-wrap gap-2">
         <button
           onClick={() => setShowComments(!showComments)}
           className="flex items-center text-sm text-gray-600 hover:text-blue-600"
@@ -172,36 +290,37 @@ const TaskCard = ({ task, onStatusChange }) => {
           <ChatBubbleLeftIcon className="h-4 w-4 mr-1" />
           Комментарии ({task.comments?.length || 0})
         </button>
-        {isManager && task.status !== 'archived' && (
-          <>
-            <button
-              onClick={() => setShowDelegate(true)}
-              className="flex items-center text-sm text-gray-600 hover:text-green-600"
-            >
-              <UserPlusIcon className="h-4 w-4 mr-1" />
-              Делегировать
-            </button>
-            <button
-              onClick={() => {
-                if (window.confirm('Архивировать эту задачу?')) {
-                  archiveMutation.mutate(task.id);
-                }
-              }}
-              className="text-sm text-yellow-600 hover:text-yellow-800"
-            >
-              Архив
-            </button>
-            <button
-              onClick={() => {
-                if (window.confirm('Удалить эту задачу навсегда?')) {
-                  deleteMutation.mutate(task.id);
-                }
-              }}
-              className="text-sm text-red-600 hover:text-red-800"
-            >
-              Удалить
-            </button>
-          </>
+        
+        {canManage && task.status !== 'archived' && (
+          <button
+            onClick={() => setShowDelegate(true)}
+            className="flex items-center text-sm text-gray-600 hover:text-green-600"
+          >
+            <UserPlusIcon className="h-4 w-4 mr-1" />
+            Делегировать
+          </button>
+        )}
+        
+        {canManage && task.status !== 'archived' && task.status !== 'completed' && (
+          <button
+            onClick={handleArchive}
+            disabled={archiveMutation.isLoading}
+            className="flex items-center text-sm text-yellow-600 hover:text-yellow-800"
+          >
+            <ArchiveBoxIcon className="h-4 w-4 mr-1" />
+            Архив
+          </button>
+        )}
+        
+        {isAdmin && (
+          <button
+            onClick={handleDelete}
+            disabled={deleteMutation.isLoading}
+            className="flex items-center text-sm text-red-600 hover:text-red-800"
+          >
+            <TrashIcon className="h-4 w-4 mr-1" />
+            Удалить
+          </button>
         )}
       </div>
 
@@ -214,7 +333,8 @@ const TaskCard = ({ task, onStatusChange }) => {
                   {comment.author_name || `Пользователь #${comment.author_id}`}
                   <span className="text-xs text-gray-400 ml-1">
                     ({comment.author_role === 'admin' ? 'Администратор' : 
-                      comment.author_role === 'manager' ? 'Руководитель' : 'Сотрудник'})
+                      comment.author_role === 'manager' ? 'Руководитель' : 
+                      comment.author_role === 'deleted' ? 'Удалён' : 'Сотрудник'})
                   </span>:
                 </span>
                 <span className="text-gray-600 ml-2">{comment.content}</span>
@@ -262,7 +382,10 @@ const TaskCard = ({ task, onStatusChange }) => {
                 >
                   <option value="">Выберите пользователя</option>
                   {users.filter(u => u.id !== task.assigned_to).map(u => (
-                    <option key={u.id} value={u.id}>{u.full_name} ({u.role === 'manager' ? 'Руководитель' : 'Сотрудник'})</option>
+                    <option key={u.id} value={u.id}>
+                      {u.full_name} ({u.role === 'manager' ? 'Руководитель' : 'Сотрудник'}) 
+                      {u.group_name && ` - ${u.group_name}`}
+                    </option>
                   ))}
                 </select>
               </div>

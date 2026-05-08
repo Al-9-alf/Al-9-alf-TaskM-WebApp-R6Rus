@@ -30,7 +30,10 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      sh -c "sleep 2 &&
+             python -c 'from app.database import engine, Base; from app import models; Base.metadata.create_all(bind=engine)' &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     networks:
       - app-network
 

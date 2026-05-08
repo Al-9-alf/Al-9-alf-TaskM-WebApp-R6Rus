@@ -5,7 +5,6 @@ import toast from 'react-hot-toast';
 const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
-
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -37,14 +36,11 @@ export const AuthProvider = ({ children }) => {
       const formData = new FormData();
       formData.append('username', email);
       formData.append('password', password);
-      
       const response = await axios.post('http://localhost:8000/api/auth/login', formData);
       const { access_token } = response.data;
-      
       localStorage.setItem('token', access_token);
       setToken(access_token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-      
       await fetchUser();
       toast.success('Вход выполнен успешно!');
       return true;

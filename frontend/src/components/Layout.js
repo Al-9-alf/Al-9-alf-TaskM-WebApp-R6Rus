@@ -6,14 +6,14 @@ import {
   ClipboardDocumentListIcon, 
   ChartBarIcon, 
   UsersIcon,
+  UserGroupIcon,
   ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline';
 import NotificationBell from './NotificationBell';
 
 const Layout = () => {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isManager } = useAuth();
   const navigate = useNavigate();
-
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -22,8 +22,11 @@ const Layout = () => {
   const navigation = [
     { name: 'Панель управления', href: '/dashboard', icon: HomeIcon },
     { name: 'Задачи', href: '/tasks', icon: ClipboardDocumentListIcon },
-    { name: 'Аналитика', href: '/analytics', icon: ChartBarIcon },
-    ...(isAdmin ? [{ name: 'Пользователи', href: '/users', icon: UsersIcon }] : []),
+    ...(isManager || isAdmin ? [{ name: 'Аналитика', href: '/analytics', icon: ChartBarIcon }] : []),
+    { name: 'Группа', href: '/groups', icon: UserGroupIcon },
+    ...(isAdmin ? [
+      { name: 'Пользователи', href: '/users', icon: UsersIcon }
+    ] : []),
   ];
 
   return (
@@ -54,7 +57,9 @@ const Layout = () => {
                 <div className="text-sm text-right">
                   <div className="font-medium text-gray-900">{user?.full_name}</div>
                   <div className="text-gray-500 text-xs capitalize">
-                    {user?.role === 'admin' ? 'Администратор' : user?.role === 'manager' ? 'Руководитель' : 'Сотрудник'}
+                    {user?.role === 'admin' ? 'Администратор' : 
+                     user?.role === 'manager' ? 'Руководитель группы' : 'Сотрудник'}
+                    {user?.group_name && <span className="ml-1">({user?.group_name})</span>}
                   </div>
                 </div>
                 <button

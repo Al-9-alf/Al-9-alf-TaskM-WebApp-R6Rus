@@ -1,27 +1,23 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import axios from 'axios';
+import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { PencilIcon, TrashIcon, UserPlusIcon } from '@heroicons/react/24/outline';
+import { TrashIcon, UserPlusIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
 const fetchUsers = async () => {
-  const response = await axios.get('http://localhost:8000/api/users/');
+  const response = await api.get('/api/users/');
   return response.data;
 };
 
 const createUser = async (userData) => {
-  const response = await axios.post('http://localhost:8000/api/users/', userData);
-  return response.data;
-};
-
-const updateRole = async ({ userId, role }) => {
-  const response = await axios.put(`http://localhost:8000/api/users/${userId}/role`, { role });
+  const response = await api.post('/api/users/', userData);
   return response.data;
 };
 
 const deleteUser = async (userId) => {
-  await axios.delete(`http://localhost:8000/api/users/${userId}`);
+  const response = await api.delete(`/api/users/${userId}`);
+  return response.data;
 };
 
 const UsersPage = () => {
@@ -30,46 +26,77 @@ const UsersPage = () => {
     email: '',
     full_name: '',
     password: '',
-    role: 'employee',
   });
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const queryClient = useQueryClient();
-
-  const { data: users = [], isLoading } = useQuery('users', fetchUsers);
+  const { data: users = [], isLoading } = useQuery('users', fetchUsers, {
+    retry: 1,
+    onError: (error) => {
+      const errorMessage = error.response?.data?.detail || error.message;
+      toast.error('Ошибка загрузки пользователей: ' + errorMessage);
+    }
+  });
 
   const createMutation = useMutation(createUser, {
     onSuccess: () => {
       queryClient.invalidateQueries('users');
       setShowCreateForm(false);
-      setFormData({ email: '', full_name: '', password: '', role: 'employee' });
+      setFormData({ email: '', full_name: '', password: '' });
       toast.success('Пользователь успешно создан');
     },
     onError: (error) => {
-      toast.error('Ошибка создания пользователя: ' + (error.response?.data?.detail || 'Неизвестная ошибка'));
-    },
-  });
-
-  const updateRoleMutation = useMutation(updateRole, {
-    onSuccess: () => {
-      queryClient.invalidateQueries('users');
-      toast.success('Роль обновлена');
+      const errorMessage = error.response?.data?.detail || error.message || 'Неизвестная ошибка';
+      toast.error('Ошибка создания пользователя: ' + errorMessage);
     },
   });
 
   const deleteMutation = useMutation(deleteUser, {
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries('users');
-      toast.success('Пользователь удалён');
+      toast.success(data?.message || 'Пользователь успешно удалён');
+    },
+    onError: (error) => {
+      const errorDetail = error.response?.data?.detail;
+      
+      if (errorDetail && errorDetail.includes('активными задачами')) {
+        toast.error(errorDetail, { duration: 8000 });
+      } else if (errorDetail) {
+        toast.error('Ошибка удаления пользователя: ' + errorDetail);
+      } else {
+        toast.error('Ошибка удаления пользователя: ' + (error.message || 'Неизвестная ошибка'));
+      }
     },
   });
 
   const handleCreate = (e) => {
     e.preventDefault();
+    if (!formData.email || !formData.full_name || !formData.password) {
+      toast.error('Заполните все поля');
+      return;
+    }
     if (formData.password.length < 6) {
       toast.error('Пароль должен содержать минимум 6 символов');
       return;
     }
     createMutation.mutate(formData);
+  };
+
+  const handleDeleteClick = async (user) => {
+    if (user.id === currentUser?.id) {
+      toast.error('Нельзя удалить самого себя');
+      return;
+    }
+    const confirmMessage = `Вы уверены, что хотите удалить пользователя "${user.full_name}"?\n\n` +
+      `Внимание: Удаление возможно только если у пользователя нет активных задач (кроме завершённых).\n` +
+      `Завершённые задачи останутся в системе для сохранения истории.`;
+    
+    if (window.confirm(confirmMessage)) {
+      try {
+        await deleteMutation.mutateAsync(user.id);
+      } catch (err) {
+        console.error('Delete error:', err);
+      }
+    }
   };
 
   if (isLoading) {
@@ -85,7 +112,7 @@ const UsersPage = () => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Управление пользователями</h1>
-          <p className="text-gray-600">Управляйте пользователями и ролями системы</p>
+          <p className="text-gray-600">Управляйте пользователями системы</p>
         </div>
         <button
           onClick={() => setShowCreateForm(true)}
@@ -96,16 +123,38 @@ const UsersPage = () => {
         </button>
       </div>
 
+      <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6 rounded">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="ml-3">
+            <p className="text-sm text-blue-700">
+              💡 <strong>Как работает система ролей:</strong><br />
+              • Новые пользователи всегда создаются с ролью <strong>Сотрудник</strong><br />
+              • Пользователь становится <strong>Руководителем</strong> только когда его назначают руководителем группы<br />
+              • Чтобы назначить руководителя, сначала создайте группу, добавьте в неё пользователя, затем отредактируйте группу и выберите руководителя<br />
+              • При снятии с роли руководителя группы, пользователь снова становится сотрудником
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded">
         <div className="flex">
           <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+            <svg className="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
           </div>
           <div className="ml-3">
             <p className="text-sm text-yellow-700">
-              ⚠️ В системе только один администратор. Вы не можете создать другого администратора.
+              ⚠️ <strong>Важно:</strong> Пользователя можно удалить только если у него нет активных задач<br />
+              • <strong>Активные задачи</strong> — задачи со статусами "Новая", "В работе", "На проверке"<br />
+              • <strong>Завершённые и архивные задачи</strong> останутся в системе для сохранения истории<br />
+              • Перед удалением пользователя переназначьте или завершите его активные задачи
             </p>
           </div>
         </div>
@@ -125,6 +174,9 @@ const UsersPage = () => {
                 Роль
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Группа
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Дата создания
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -135,7 +187,7 @@ const UsersPage = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {users.length === 0 ? (
               <tr>
-                <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
                   Нет пользователей. Создайте первого!
                 </td>
               </tr>
@@ -149,27 +201,29 @@ const UsersPage = () => {
                     {user.email}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <select
-                      value={user.role}
-                      onChange={(e) => updateRoleMutation.mutate({ userId: user.id, role: e.target.value })}
-                      className="px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      disabled={user.id === currentUser?.id}
-                    >
-                      <option value="employee">Сотрудник</option>
-                      <option value="manager">Руководитель</option>
-                    </select>
+                    <span className={`px-2 py-1 rounded-full text-xs ${
+                      user.role === 'manager' 
+                        ? 'bg-blue-100 text-blue-800' 
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {user.role === 'manager' ? 'Руководитель' : 'Сотрудник'}
+                    </span>
+                    {user.role === 'manager' && user.group_name && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        (руководитель группы "{user.group_name}")
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {user.group_name || '—'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {new Date(user.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <button
-                      onClick={() => {
-                        if (window.confirm(`Вы уверены, что хотите удалить ${user.full_name}?`)) {
-                          deleteMutation.mutate(user.id);
-                        }
-                      }}
-                      disabled={user.id === currentUser?.id}
+                      onClick={() => handleDeleteClick(user)}
+                      disabled={deleteMutation.isLoading}
                       className="text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
                       title={user.id === currentUser?.id ? "Нельзя удалить себя" : "Удалить пользователя"}
                     >
@@ -228,19 +282,12 @@ const UsersPage = () => {
                   placeholder="••••••"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Роль
-                </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="input"
-                >
-                  <option value="employee">Сотрудник</option>
-                  <option value="manager">Руководитель</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-1">Роль администратора нельзя назначить</p>
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <p className="text-xs text-blue-700">
+                  📌 <strong>Примечание:</strong> Новый пользователь будет создан с ролью <strong>Сотрудник</strong>.
+                  Чтобы сделать его руководителем, создайте группу, добавьте пользователя в группу,
+                  затем назначьте его руководителем этой группы при редактировании.
+                </p>
               </div>
               <div className="flex justify-end space-x-3 pt-4">
                 <button type="button" onClick={() => setShowCreateForm(false)} className="btn-secondary">

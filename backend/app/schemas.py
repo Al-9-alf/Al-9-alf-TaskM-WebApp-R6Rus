@@ -20,7 +20,40 @@ class TaskPriority(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
 
-# User schemas
+class GroupBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+
+class GroupCreate(GroupBase):
+    leader_id: Optional[int] = None
+
+class GroupUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    leader_id: Optional[int] = None
+
+class GroupResponse(GroupBase):
+    id: int
+    leader_id: Optional[int] = None
+    leader_name: Optional[str] = None
+    created_at: datetime
+    member_count: int = 0
+    
+    class Config:
+        from_attributes = True
+
+class GroupMember(BaseModel):
+    user_id: int
+    full_name: str
+    email: str
+    role: UserRole
+
+class AddMemberToGroup(BaseModel):
+    user_id: int
+
+class RemoveMemberFromGroup(BaseModel):
+    user_id: int
+
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
@@ -35,25 +68,25 @@ class UserUpdateRole(BaseModel):
 class UserResponse(UserBase):
     id: int
     created_at: datetime
-    
+    group_id: Optional[int] = None
+    group_name: Optional[str] = None
     class Config:
         from_attributes = True
 
-# Task schemas
 class TaskBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
     priority: TaskPriority = TaskPriority.MEDIUM
-    deadline: datetime
+    deadline: Optional[datetime] = None
     assigned_to: int
-
     @validator('deadline')
     def validate_deadline(cls, v):
-        if v.tzinfo is None:
-            v = v.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        if v < now:
-            raise ValueError('Deadline cannot be in the past')
+        if v is not None:
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if v < now:
+                raise ValueError('Deadline cannot be in the past')
         return v
 
 class TaskCreate(TaskBase):
@@ -87,26 +120,25 @@ class TaskResponse(BaseModel):
     title: str
     description: Optional[str] = None
     priority: TaskPriority
-    deadline: datetime
-    assigned_to: int
+    deadline: Optional[datetime] = None
+    assigned_to: Optional[int] = None
     status: TaskStatus
     created_at: datetime
     updated_at: Optional[datetime] = None
-    created_by: int
+    created_by: Optional[int] = None
     delegated_from: Optional[int] = None
     delegation_reason: Optional[str] = None
-    assignee: UserResponse
-    creator: UserResponse
+    assignee: Optional[UserResponse] = None
+    creator: Optional[UserResponse] = None
     comments: List[CommentResponse] = []
+    assignee_group_name: Optional[str] = None
     
     class Config:
         from_attributes = True
 
-# Comment schemas
 class CommentCreate(BaseModel):
     content: str = Field(..., min_length=1)
 
-# Notification schemas
 class NotificationResponse(BaseModel):
     id: int
     message: str
@@ -117,7 +149,6 @@ class NotificationResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Analytics schemas
 class MyAnalyticsOverview(BaseModel):
     completion_rate: float
     overdue_tasks: int
@@ -144,7 +175,6 @@ class RankingItem(BaseModel):
     completion_rate: float
     completed_tasks: int
 
-# Auth schemas
 class Token(BaseModel):
     access_token: str
     token_type: str

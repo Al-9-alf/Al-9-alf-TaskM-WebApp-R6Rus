@@ -8,11 +8,11 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import UsersPage from './pages/UsersPage';
+import GroupsPage from './pages/GroupsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import TaskBoard from './components/TaskBoard';
 
 const queryClient = new QueryClient();
-
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -28,6 +28,7 @@ function App() {
                 <Route path="/tasks" element={<TaskBoard />} />
                 <Route path="/analytics" element={<AnalyticsPage />} />
                 <Route path="/users" element={<UsersPage />} />
+                <Route path="/groups" element={<GroupsPage />} />
               </Route>
             </Route>
           </Routes>
