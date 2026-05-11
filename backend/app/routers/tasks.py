@@ -395,26 +395,31 @@ def delegate_task(
     
     old_assignee = db.query(models.User).filter(models.User.id == task.assigned_to).first()
     old_assignee_name = old_assignee.full_name if old_assignee else (task.assigned_to_name or "Неизвестный пользователь")
+    
     if not task.assigned_to_name and old_assignee:
         task.assigned_to_name = old_assignee.full_name
     
-    task.assigned_to = delegation.new_assignee_id
-    task.delegated_from = delegation.new_assignee_id
+    task.delegated_from = task.assigned_to  # От кого делегировали (старый исполнитель)
+    task.assigned_to = delegation.new_assignee_id  # Новый исполнитель
     task.delegation_reason = delegation.reason
+    
     db.commit()
     db.refresh(task)
+    
     assignee_group_name = get_user_group_name(db, task.assigned_to)
-    create_notification(
-        db, task.assigned_to,
-        f"Задача '{task.title}' переделегирована от {old_assignee_name}. Причина: {delegation.reason}",
-        "task_redelegated"
-    )
     
     create_notification(
         db, delegation.new_assignee_id,
         f"Вам переделегирована задача '{task.title}' от {old_assignee_name}. Причина: {delegation.reason}",
         "task_redelegated"
     )
+    
+    if old_assignee:
+        create_notification(
+            db, old_assignee.id,
+            f"Задача '{task.title}' передана другому исполнителю ({new_assignee.full_name}). Причина: {delegation.reason}",
+            "task_delegated_away"
+        )
     
     return schemas.TaskResponse(
         id=task.id,

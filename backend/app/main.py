@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.database import engine, Base, init_db
 from app.routers import auth, users, tasks, analytics, notifications, groups
 from app import models
@@ -84,13 +85,7 @@ def health_check():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    from fastapi.responses import JSONResponse
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc)},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        }
+        content={"detail": str(exc)}
     )
