@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { BellIcon } from '@heroicons/react/24/outline';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import axios from 'axios';
@@ -18,10 +18,31 @@ const markAllAsRead = async () => {
   await axios.put('http://localhost:8000/api/notifications/read-all');
 };
 
+const getNotificationIcon = (type) => {
+  switch (type) {
+    case 'task_assigned': return '📋';
+    case 'task_completed': return '✅';
+    case 'task_rework': return '🔄';
+    case 'task_delegated_to': return '📨';
+    case 'task_delegated_from': return '📤';
+    case 'task_comment': return '💬';
+    case 'group_leader_assigned': return '👑';
+    case 'group_leader_removed': return '📌';
+    case 'group_deleted_leader_removed': return '🗑️';
+    case 'group_deleted_member_removed': return '🗑️';
+    case 'group_changed': return '🔄';
+    case 'group_added': return '➕';
+    case 'group_removed': return '🚫';
+    default: return '🔔';
+  }
+};
+
 const NotificationBell = () => {
   const [isOpen, setIsOpen] = useState(false);
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const dropdownRef = useRef(null);
+  const buttonRef = useRef(null);
 
   const { data: notifications = [] } = useQuery(
     'notifications',
@@ -42,10 +63,40 @@ const NotificationBell = () => {
     },
   });
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        isOpen &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (isOpen && event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen]);
+
   const unreadCount = notifications.filter(n => !n.is_read).length;
+
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-gray-600 hover:text-gray-900"
       >
@@ -58,7 +109,10 @@ const NotificationBell = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-lg z-50">
+        <div 
+          ref={dropdownRef}
+          className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-lg z-50"
+        >
           <div className="p-4 border-b border-gray-200">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">Уведомления</h3>
@@ -84,7 +138,9 @@ const NotificationBell = () => {
                   }`}
                   onClick={() => markAsReadMutation.mutate(notification.id)}
                 >
-                  <p className="text-sm text-gray-900">{notification.message}</p>
+                  <p className="text-sm text-gray-900">
+                    {getNotificationIcon(notification.notification_type)} {notification.message}
+                  </p>
                   <p className="text-xs text-gray-500 mt-1">
                     {new Date(notification.created_at).toLocaleString()}
                   </p>

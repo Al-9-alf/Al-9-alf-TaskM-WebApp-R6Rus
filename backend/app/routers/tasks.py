@@ -87,7 +87,7 @@ def get_tasks(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    query = db.query(models.Task)
+    query = db.query(models.Task).filter(models.Task.status != models.TaskStatus.ARCHIVED)
     
     if status:
         query = query.filter(models.Task.status == status)
@@ -149,6 +149,128 @@ def get_tasks(
         result.append(task_response)
     
     return result
+
+@router.get("/archived", response_model=List[schemas.TaskResponse])
+def get_archived_tasks(
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+):
+    query = db.query(models.Task).filter(models.Task.status == models.TaskStatus.ARCHIVED)
+    
+    if search:
+        query = query.filter(
+            or_(
+                models.Task.title.ilike(f"%{search}%"),
+                models.Task.description.ilike(f"%{search}%")
+            )
+        )
+    
+    tasks = query.order_by(models.Task.updated_at.desc()).offset(offset).limit(limit).all()
+    
+    result = []
+    for task in tasks:
+        for comment in task.comments:
+            if comment.author:
+                comment.author_name = comment.author.full_name
+                comment.author_role = comment.author.role.value
+            else:
+                comment.author_name = f"Пользователь #{comment.author_id} (удалён)"
+                comment.author_role = "deleted"
+        
+        assignee_group_name = get_user_group_name(db, task.assigned_to) if task.assigned_to else None
+        
+        task_response = schemas.TaskResponse(
+            id=task.id,
+            title=task.title,
+            description=task.description,
+            priority=task.priority,
+            deadline=task.deadline,
+            assigned_to=task.assigned_to,
+            status=task.status,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            created_by=task.created_by,
+            delegated_from=task.delegated_from,
+            delegation_reason=task.delegation_reason,
+            assignee=build_user_response_from_task(db, task, 'assignee'),
+            creator=build_user_response_from_task(db, task, 'creator'),
+            comments=[
+                schemas.CommentResponse(
+                    id=comment.id,
+                    content=comment.content,
+                    created_at=comment.created_at,
+                    author_id=comment.author_id,
+                    author_name=comment.author.full_name if comment.author else f"Пользователь #{comment.author_id} (удалён)",
+                    author_role=comment.author.role.value if comment.author else 'deleted'
+                ) for comment in task.comments
+            ],
+            assignee_group_name=assignee_group_name
+        )
+        result.append(task_response)
+    
+    return result
+
+@router.post("/{task_id}/restore", response_model=schemas.TaskResponse)
+def restore_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_manager_or_admin)
+):
+    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status != models.TaskStatus.ARCHIVED:
+        raise HTTPException(status_code=400, detail="Task is not archived")
+    
+    if not can_manage_task(db, task, current_user):
+        raise HTTPException(status_code=403, detail="Нет прав на восстановление этой задачи")
+    
+    original_status = getattr(task, 'original_status', None)
+    if original_status and original_status != models.TaskStatus.ARCHIVED:
+        task.status = original_status
+    else:
+        task.status = models.TaskStatus.NEW
+    
+    db.commit()
+    db.refresh(task)
+    
+    if task.assigned_to:
+        status_text = {
+            models.TaskStatus.NEW: "Новая",
+            models.TaskStatus.IN_PROGRESS: "В работе",
+            models.TaskStatus.IN_REVIEW: "На проверке",
+            models.TaskStatus.COMPLETED: "Завершённая"
+        }.get(task.status, "Новая")
+        
+        create_notification(
+            db, task.assigned_to,
+            f"Задача \"{task.title}\" восстановлена из архива в статус \"{status_text}\"",
+            "task_restored"
+        )
+    
+    assignee_group_name = get_user_group_name(db, task.assigned_to) if task.assigned_to else None
+    return schemas.TaskResponse(
+        id=task.id,
+        title=task.title,
+        description=task.description,
+        priority=task.priority,
+        deadline=task.deadline,
+        assigned_to=task.assigned_to,
+        status=task.status,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+        created_by=task.created_by,
+        delegated_from=task.delegated_from,
+        delegation_reason=task.delegation_reason,
+        assignee=build_user_response_from_task(db, task, 'assignee'),
+        creator=build_user_response_from_task(db, task, 'creator'),
+        comments=[],
+        assignee_group_name=assignee_group_name
+    )
 
 @router.get("/{task_id}", response_model=schemas.TaskResponse)
 def get_task(
@@ -294,6 +416,9 @@ def update_task(
     if not can_manage_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Нет прав на редактирование этой задачи")
     
+    if task_data.status == models.TaskStatus.ARCHIVED and task.status != models.TaskStatus.ARCHIVED:
+        task.original_status = task.status
+    
     for field, value in task_data.dict(exclude_unset=True).items():
         setattr(task, field, value)
     
@@ -331,6 +456,8 @@ def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    old_status = task.status
+    
     if current_user.role == models.UserRole.ADMIN:
         pass
     elif current_user.role == models.UserRole.MANAGER:
@@ -345,6 +472,21 @@ def update_task_status(
     task.status = status
     db.commit()
     db.refresh(task)
+    
+    if status == models.TaskStatus.COMPLETED and task.assigned_to:
+        create_notification(
+            db, task.assigned_to,
+            f"Задача \"{task.title}\" отмечена как завершённая!",
+            "task_completed"
+        )
+    
+    if status == models.TaskStatus.IN_PROGRESS and old_status == models.TaskStatus.IN_REVIEW and task.assigned_to:
+        create_notification(
+            db, task.assigned_to,
+            f"Задача \"{task.title}\" отправлена на доработку. Требуются исправления.",
+            "task_rework"
+        )
+    
     assignee_group_name = get_user_group_name(db, task.assigned_to) if task.assigned_to else None
     return schemas.TaskResponse(
         id=task.id,
@@ -399,8 +541,9 @@ def delegate_task(
     if not task.assigned_to_name and old_assignee:
         task.assigned_to_name = old_assignee.full_name
     
-    task.delegated_from = task.assigned_to  # От кого делегировали (старый исполнитель)
-    task.assigned_to = delegation.new_assignee_id  # Новый исполнитель
+    old_assignee_id = task.assigned_to
+    task.delegated_from = task.assigned_to
+    task.assigned_to = delegation.new_assignee_id
     task.delegation_reason = delegation.reason
     
     db.commit()
@@ -410,15 +553,15 @@ def delegate_task(
     
     create_notification(
         db, delegation.new_assignee_id,
-        f"Вам переделегирована задача '{task.title}' от {old_assignee_name}. Причина: {delegation.reason}",
-        "task_redelegated"
+        f"Вам переделегирована задача \"{task.title}\" от {old_assignee_name}. Причина: {delegation.reason}",
+        "task_delegated_to"
     )
     
     if old_assignee:
         create_notification(
             db, old_assignee.id,
-            f"Задача '{task.title}' передана другому исполнителю ({new_assignee.full_name}). Причина: {delegation.reason}",
-            "task_delegated_away"
+            f"Задача \"{task.title}\" передана другому исполнителю ({new_assignee.full_name}). Причина: {delegation.reason}",
+            "task_delegated_from"
         )
     
     return schemas.TaskResponse(
@@ -473,6 +616,21 @@ def add_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
+    
+    if task.assigned_to and task.assigned_to != current_user.id:
+        create_notification(
+            db, task.assigned_to,
+            f"Новый комментарий от {current_user.full_name} к задаче \"{task.title}\": {comment_data.content[:100]}...",
+            "task_comment"
+        )
+    
+    if task.created_by and task.created_by != current_user.id and task.created_by != task.assigned_to:
+        create_notification(
+            db, task.created_by,
+            f"Новый комментарий от {current_user.full_name} к задаче \"{task.title}\"",
+            "task_comment"
+        )
+    
     return schemas.CommentResponse(
         id=comment.id,
         content=comment.content,

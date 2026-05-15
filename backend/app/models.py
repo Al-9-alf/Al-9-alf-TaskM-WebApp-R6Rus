@@ -62,6 +62,7 @@ class Task(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_to_name = Column(String, nullable=True)
     created_by_name = Column(String, nullable=True)
+    original_status = Column(String, nullable=True)  # Сохраняем исходный статус при архивации
     assignee = relationship("User", foreign_keys=[assigned_to], back_populates="assigned_tasks")
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_tasks")
     comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
