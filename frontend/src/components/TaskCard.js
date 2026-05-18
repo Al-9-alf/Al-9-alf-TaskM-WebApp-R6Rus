@@ -208,18 +208,11 @@ const TaskCard = ({ task, onRestore, onUpdate, draggable = true, onDragStart }) 
   const isManagerOfGroup = isManager && !isAdmin;
   const isAdminUser = isAdmin;
   const isArchived = task.status === 'archived';
-  
   const canManage = isAdmin || (isManager && task.assignee?.group_id === user?.group_id);
   const canArchive = canManage && !isArchived;
-  
-  // Исполнитель может менять статус только своих задач (Новая -> В работе -> На проверке)
   const canAssigneeChangeStatus = isAssignee && (task.status === 'new' || task.status === 'in_progress');
-  
-  // Руководитель/админ может менять статус только задач на проверке (На проверке -> В работе или Завершена)
   const canManagerChangeReviewStatus = (isAdmin || (isManager && task.assignee?.group_id === user?.group_id)) && task.status === 'in_review';
-  
   const canChangeStatus = canAssigneeChangeStatus || canManagerChangeReviewStatus;
-
   const assigneeName = task.assignee?.full_name || (task.assigned_to_name ? `${task.assigned_to_name} (удалён)` : 'Не назначен');
   const creatorName = task.creator?.full_name || (task.created_by_name ? `${task.created_by_name} (удалён)` : 'Неизвестен');
 
@@ -302,7 +295,6 @@ const TaskCard = ({ task, onRestore, onUpdate, draggable = true, onDragStart }) 
       draggable={draggable && !isArchived && canChangeStatus}
       onDragStart={handleDragStart}
     >
-      {/* Сжатый вид - всегда виден */}
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -368,7 +360,6 @@ const TaskCard = ({ task, onRestore, onUpdate, draggable = true, onDragStart }) 
         </div>
       </div>
 
-      {/* Развёрнутый вид - показывается только при isExpanded === true */}
       {isExpanded && (
         <div className="mt-3 pt-3 border-t border-gray-100">
           {task.description && (
@@ -396,7 +387,6 @@ const TaskCard = ({ task, onRestore, onUpdate, draggable = true, onDragStart }) 
 
           {!isArchived && (
             <>
-              {/* Исполнитель: может взять в работу и отправить на проверку */}
               {canAssigneeChangeStatus && (
                 <div className="mt-3 space-y-2">
                   {task.status === 'new' && (
@@ -423,7 +413,6 @@ const TaskCard = ({ task, onRestore, onUpdate, draggable = true, onDragStart }) 
                 </div>
               )}
 
-              {/* Руководитель/админ: может завершить или отправить на доработку задачу на проверке */}
               {canManagerChangeReviewStatus && (
                 <div className="mt-3 space-y-2">
                   <button

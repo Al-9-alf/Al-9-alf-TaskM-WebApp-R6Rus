@@ -177,12 +177,10 @@ const Dashboard = () => {
     const isAssignee = task.assigned_to === user?.id;
     const isManagerOrAdmin = isAdmin || isManager;
     
-    // Исполнитель может перетаскивать только свои задачи в статусе "Новая" или "В работе"
     if (isAssignee && (task.status === 'new' || task.status === 'in_progress')) {
       return true;
     }
     
-    // Руководитель/админ может перетаскивать только задачи в статусе "На проверке"
     if (isManagerOrAdmin && task.status === 'in_review') {
       return true;
     }
@@ -227,7 +225,6 @@ const Dashboard = () => {
     let newStatus = null;
     let errorMessage = null;
     
-    // Логика для исполнителя
     if (isAssignee && (currentStatus === 'new' || currentStatus === 'in_progress')) {
       if (currentStatus === 'new' && targetStatus === 'in_progress') {
         newStatus = 'in_progress';
@@ -237,7 +234,6 @@ const Dashboard = () => {
         errorMessage = `Исполнитель может перемещать задачи только: Новая → В работе → На проверке`;
       }
     }
-    // Логика для руководителя/админа (только задачи на проверке)
     else if (isManagerOrAdmin && currentStatus === 'in_review') {
       if (targetStatus === 'in_progress') {
         newStatus = 'in_progress';
